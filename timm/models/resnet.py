@@ -495,6 +495,7 @@ def drop_blocks(drop_prob=0.):
 def make_blocks(
         block_fn, channels, block_repeats, inplanes, reduce_first=1, output_stride=32,
         down_kernel_size=1, avg_down=False, drop_block_rate=0., drop_path_rate=0., **kwargs):
+    
     stages = []
     feature_info = []
     net_num_blocks = sum(block_repeats)
@@ -502,37 +503,110 @@ def make_blocks(
     net_stride = 4
     dilation = prev_dilation = 1
     for stage_idx, (planes, num_blocks, db) in enumerate(zip(channels, block_repeats, drop_blocks(drop_block_rate))):
+        # print(stage_idx, (planes, num_blocks, db))
+        # 0 (64, 3, None)
+        # 1 (128, 8, None)
+        # 2 (256, 36, None)
+        # 3 (512, 3, None)
         stage_name = f'layer{stage_idx + 1}'  # never liked this name, but weight compat requires it
+        # print(stage_name)
+        # layer1, layer2, layer3, layer4
         stride = 1 if stage_idx == 0 else 2
+        # print(stride)
+        # 1, 2, 2, 2
+        
+        # print(net_stride, output_stride)
+        # 4 32
+        # 4 32
+        # 8 32
+        # 16 32
+        
         if net_stride >= output_stride:
             dilation *= stride
             stride = 1
         else:
             net_stride *= stride
-
+        # print(dilation, stride, net_stride, inplanes, planes, block_fn.expansion)
+        # 1 1 4 64 64 4
+        # 1 2 8 256 128 4
+        # 1 2 16 512 256 4
+        # 1 2 32 1024 512 4
         downsample = None
         if stride != 1 or inplanes != planes * block_fn.expansion:
+            # print(stage_idx)
+            # 0, 1, 2, 3
             down_kwargs = dict(
                 in_channels=inplanes, out_channels=planes * block_fn.expansion, kernel_size=down_kernel_size,
                 stride=stride, dilation=dilation, first_dilation=prev_dilation, norm_layer=kwargs.get('norm_layer'))
+            # print(stage_idx, avg_down)
+            # 0 False
+            # 1 False
+            # 2 False
+            # 3 False
             downsample = downsample_avg(**down_kwargs) if avg_down else downsample_conv(**down_kwargs)
-
+            
+            # print(stage_idx, downsample)
+            # 0 Sequential((0): Conv2d() (1): BatchNorm2d())
+            # 1 Sequential((0): Conv2d() (1): BatchNorm2d())
+            # 2 Sequential((0): Conv2d() (1): BatchNorm2d())
+            # 3 Sequential((0): Conv2d() (1): BatchNorm2d())
+        
+        # print(reduce_first, dilation, db)
+        # 1 1 None
+        # 1 1 None
+        # 1 1 None
+        # 1 1 None
         block_kwargs = dict(reduce_first=reduce_first, dilation=dilation, drop_block=db, **kwargs)
         blocks = []
+        # print(stage_idx, num_blocks)
+        # 0 3
+        # 1 8
+        # 2 36
+        # 3 3 
         for block_idx in range(num_blocks):
             downsample = downsample if block_idx == 0 else None
+            # print((stage_idx, block_idx), downsample)
+            # downsample is None except for (0, 0), (1, 0), (2, 0), (3, 0)
             stride = stride if block_idx == 0 else 1
+            
+            # print((stage_idx, block_idx), stride)
+            # stride==2 for (1, 0), (2, 0), (3, 0), stride==1 for others
+            
             block_dpr = drop_path_rate * net_block_idx / (net_num_blocks - 1)  # stochastic depth linear decay rule
+            
+            # print((stage_idx, block_idx), block_dpr)
+            # block_dpr==0 all the time
             blocks.append(block_fn(
                 inplanes, planes, stride, downsample, first_dilation=prev_dilation,
                 drop_path=DropPath(block_dpr) if block_dpr > 0. else None, **block_kwargs))
             prev_dilation = dilation
             inplanes = planes * block_fn.expansion
             net_block_idx += 1
-
+        
+        # print(stage_idx, type(blocks), len(blocks))
+        # 0 <class 'list'> 3
+        # 1 <class 'list'> 8
+        # 2 <class 'list'> 36
+        # 3 <class 'list'> 3
+        
         stages.append((stage_name, nn.Sequential(*blocks)))
         feature_info.append(dict(num_chs=inplanes, reduction=net_stride, module=stage_name))
-
+    
+    # print(type(stages), len(stages))
+    # <class 'list'> 4
+    
+    #for x, y in stages:
+    #    print(x, len(y))
+    # layer1 3
+    # layer2 8
+    # layer3 36
+    # layer4 3
+    
+    # print(feature_info)
+    # [{'num_chs': 256, 'reduction': 4, 'module': 'layer1'}, 
+    # {'num_chs': 512, 'reduction': 8, 'module': 'layer2'}, 
+    # {'num_chs': 1024, 'reduction': 16, 'module': 'layer3'}, 
+    # {'num_chs': 2048, 'reduction': 32, 'module': 'layer4'}]
     return stages, feature_info
 
 
@@ -599,6 +673,9 @@ class ResNet(nn.Module):
             down_kernel_size=1, avg_down=False, act_layer=nn.ReLU, norm_layer=nn.BatchNorm2d, aa_layer=None,
             drop_rate=0.0, drop_path_rate=0., drop_block_rate=0., zero_init_last=True, block_args=None):
         super(ResNet, self).__init__()
+        
+        
+        
         block_args = block_args or dict()
         assert output_stride in (8, 16, 32)
         self.num_classes = num_classes
@@ -647,6 +724,8 @@ class ResNet(nn.Module):
 
         # Feature Blocks
         channels = [64, 128, 256, 512]
+        
+        
         stage_modules, stage_feature_info = make_blocks(
             block, channels, layers, inplanes, cardinality=cardinality, base_width=base_width,
             output_stride=output_stride, reduce_first=block_reduce_first, avg_down=avg_down,
@@ -693,18 +772,30 @@ class ResNet(nn.Module):
         self.global_pool, self.fc = create_classifier(self.num_features, self.num_classes, pool_type=global_pool)
 
     def forward_features(self, x):
+        # x: torch.Size([1, 3, 224, 224])
+        print(x.shape)
         x = self.conv1(x)
         x = self.bn1(x)
         x = self.act1(x)
+        # x: torch.Size([1, 64, 112, 112])
+        print(x.shape)
         x = self.maxpool(x)
-
+        # x: torch.Size([1, 64, 56, 56])
+        print(x.shape)
         if self.grad_checkpointing and not torch.jit.is_scripting():
             x = checkpoint_seq([self.layer1, self.layer2, self.layer3, self.layer4], x, flatten=True)
         else:
             x = self.layer1(x)
+            # torch.Size([1, 256, 56, 56])
             x = self.layer2(x)
+            # torch.Size([1, 512, 28, 28])
+            print(x.shape)
             x = self.layer3(x)
+            # torch.Size([1, 1024, 14, 14])
+            print(x.shape)
             x = self.layer4(x)
+        # torch.Size([1, 2048, 7, 7])
+        print(x.shape)
         return x
 
     def forward_head(self, x, pre_logits: bool = False):
