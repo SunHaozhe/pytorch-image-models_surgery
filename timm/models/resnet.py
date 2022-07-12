@@ -576,6 +576,11 @@ def make_blocks(
             
             # print((stage_idx, block_idx), block_dpr)
             # block_dpr==0 all the time
+            
+            
+            
+            print((stage_idx, block_idx), block_kwargs)
+            
             blocks.append(block_fn(
                 inplanes, planes, stride, downsample, first_dilation=prev_dilation,
                 drop_path=DropPath(block_dpr) if block_dpr > 0. else None, **block_kwargs))

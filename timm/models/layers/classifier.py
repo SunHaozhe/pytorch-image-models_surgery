@@ -14,6 +14,10 @@ def _create_pool(num_features, num_classes, pool_type='avg', use_conv=False):
         assert num_classes == 0 or use_conv,\
             'Pooling can only be disabled if classifier is also removed or conv classifier is used'
         flatten_in_pool = False  # disable flattening if pooling is pass-through (no pooling)
+    
+    # print(pool_type, flatten_in_pool)
+    # avg True
+    
     global_pool = SelectAdaptivePool2d(pool_type=pool_type, flatten=flatten_in_pool)
     num_pooled_features = num_features * global_pool.feat_mult()
     return global_pool, num_pooled_features
